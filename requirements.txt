@@ -1,0 +1,8 @@
+mediapipe==1.2.3
+opencv-python==5.0.0.93
+scipy==1.17.1
+numpy==2.4.6
+pyobjc-framework-Cocoa==13.0
+pyobjc-framework-Quartz==13.0
+pyobjc-framework-ApplicationServices==13.0
+coremltools==9.0

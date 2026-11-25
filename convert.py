@@ -1,0 +1,61 @@
+"""Build the Core ML models gaze runs on: UniGaze ViT-H/14 and ViT-L/16, fp16 activations, int8 weights.
+
+Run by install.sh in a throwaway environment (coremltools converts with torch 2.7 and numpy 1.x; the
+runtime environment has neither torch nor unigaze):
+
+    uv run --no-project --python 3.11 --with torch==2.7.0 --with 'numpy<2' --with coremltools==9.0 --with unigaze convert.py
+
+Measured on an M5 Pro, one face per call (ViT-H / ViT-L):
+    Neural Engine   55 ms / 17 ms, every operation on the engine, GPU untouched
+    GPU             17 ms / 12 ms when the GPU is free, 2-3x that when something else is using it
+    energy          about 0.15 J / 0.04 J on the Neural Engine, the same order on the GPU
+int8 per-channel weights halve the files (1.2 GB -> 600 MB for ViT-H), run 15% faster on the Neural
+Engine than fp16 weights, and move the output by under 0.04 degrees. A batch of two is slower than two
+calls on the Neural Engine, so the models take one face.
+"""
+import os, shutil, sys, tempfile, time, warnings
+
+warnings.filterwarnings("ignore")
+import numpy as np, torch, coremltools as ct, coremltools.optimize.coreml as cto, unigaze
+
+STATE = os.path.expanduser("~/Library/Application Support/gaze")
+
+
+class Head(torch.nn.Module):
+    def __init__(self, model):
+        super().__init__(); self.model = model
+
+    def forward(self, x):
+        return self.model(x)["pred_gaze"]
+
+
+def build(name, short):
+    dest = os.path.join(STATE, short + ".mlmodelc")
+    t0 = time.time()
+    net = Head(unigaze.load(name, device="cpu").float().eval()).eval()
+    x = torch.randn(1, 3, 224, 224)
+    with torch.no_grad():
+        want = net(x).numpy()
+    ml = ct.convert(torch.jit.trace(net, x, strict=False), inputs=[ct.TensorType(name="x", shape=x.shape)],
+                    outputs=[ct.TensorType(name="gaze")], convert_to="mlprogram",
+                    compute_precision=ct.precision.FLOAT16, minimum_deployment_target=ct.target.macOS15)
+    ml = cto.linear_quantize_weights(ml, cto.OptimizationConfig(global_config=cto.OpLinearQuantizerConfig(
+        mode="linear_symmetric", dtype="int8", granularity="per_channel")))
+    with tempfile.TemporaryDirectory() as tmp:
+        pkg = os.path.join(tmp, short + ".mlpackage")
+        ml.save(pkg)
+        loaded = ct.models.MLModel(pkg, compute_units=ct.ComputeUnit.CPU_ONLY)  # its compiled copy lives as long as it does
+        shutil.rmtree(dest, ignore_errors=True)
+        shutil.copytree(loaded.get_compiled_model_path(), dest)
+    got = ct.models.CompiledMLModel(dest, compute_units=ct.ComputeUnit.CPU_ONLY).predict({"x": x.numpy()})["gaze"]
+    off = float(np.degrees(np.abs(got - want)).max())
+    print(f"{short}: built in {time.time() - t0:.0f} s, {off:.3f} degrees from the PyTorch model", flush=True)
+    if off > 0.3:
+        shutil.rmtree(dest)
+        sys.exit(f"{short}: the converted model is {off:.2f} degrees off: not kept")
+
+
+if __name__ == "__main__":
+    os.makedirs(STATE, exist_ok=True)
+    for name, short in (("unigaze_h14_joint", "h14"), ("unigaze_l16_joint", "l16")):
+        build(name, short)

@@ -1,0 +1,153 @@
+# gaze
+
+Mind computer interfacing for multi agent coordination: look at an agent's pane, click the mic button,
+talk. The words go to the agent you were looking at. No mouse, no keyboard, no window switching.
+
+![iTerm panes following the eyes, and a DJI Mic Mini click dictating into the one looked at](demo-panes.gif)
+
+A small blue dot sits in the corner of the iTerm pane you are looking at. One click of the DJI Mic Mini
+starts dictation into that pane; the next click sends it. (Rendered illustration of the flow; the faint
+ring marks where the eyes are and is drawn for the clip only. [mp4](demo-panes.mp4))
+
+Two parts:
+
+- **gaze** (this directory): webcam eye tracking for the Mac. Where on your screens you are looking, from
+  the built-in camera, on the laptop display and one external monitor, run on the Neural Engine. Expect
+  one to two centimetres of error: enough to pick a pane or a window, not a word.
+- **[micbtn](micbtn/)**: turns the **DJI Mic Mini**'s button into dictation. One click asks gaze where you
+  are looking, clicks there and starts hands-free dictation; the next click ends it and presses Enter once
+  the text has landed. **A DJI Mic Mini is required** for this part: its receiver reports the transmitter's
+  button over USB, which is what micbtn reads. (micbtn also turns an analog push-to-talk mic's button into
+  a held key; see its README.)
+
+## Install
+
+Apple silicon, macOS 15 or later, [uv](https://docs.astral.sh/uv/), Xcode command line tools, a DJI Mic
+Mini with its receiver plugged in, and a dictation app that starts hands-free on a double Fn press
+(Granola by default; `--dictation-app` names another).
+
+```bash
+git clone https://github.com/bhaktatejas922/gaze && cd gaze
+./install.sh                 # gaze: python environment, Core ML models (~3 GB download, a few minutes, once)
+gaze                         # calibrate, then a live gaze dot on every screen
+./micbtn/install.sh --triple-click "$PWD/micbtn/claude-split.sh claude-opus-5-5"   # the mic button
+./install.sh --daemon --glow # gaze at login, run by MicBtn; the dot on the iTerm pane you look at
+```
+
+Allow Microphone, Accessibility, Input Monitoring and Camera for MicBtn as the installers ask. Then look at
+a pane and click. Three clicks open a new pane with Claude Code in it (`claude-split.sh`); drop
+`--triple-click` for dictation only. `micbtn --gaze` prints where gaze thinks you are looking. Without the
+gaze daemon, micbtn dictates into whatever has focus, as a plain button.
+
+## Accuracy
+
+![demo](demo.gif)
+
+The white ring is where the eyes are; the green dot is the webcam's estimate. This clip is a simulation
+drawn at the accuracy measured on my desk (1.2 cm median with the head moving), not a screen recording;
+`gaze --demo 14 --record clip.mov` records the real thing on your own Mac. ([mp4](demo.mp4))
+
+## Calibrate
+
+About a minute per screen, once per person and per desk.
+
+1. Laptop screen: look at each of 9 dots until it moves, head still.
+2. Then 3 dots where you keep staring at the dot while you lean in, lean back and slide left and right.
+   This is what makes it hold up when your head moves.
+3. With an external monitor: the same on it, 9 dots and 2 moving ones. This solves where the monitor sits
+   in space.
+
+Afterwards a green circle follows your eyes. Stare at the grey crosses to judge it. `Esc` quits, `C`
+recalibrates everything, `U` only the external monitor, `F` toggles smoothing. Recalibrate when the laptop
+or the monitor moves.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `gaze` | the live gaze dot (calibrates first when there is no calibration) |
+| `gaze --recalibrate` | calibrate again from scratch |
+| `gaze --serve` | no window: answer "where are they looking?" on a local socket, looking only when asked |
+| `gaze --serve --track` | follow the eyes 20 times a second, so an answer is instant |
+| `gaze --serve --glow` | `--track`, plus a small dot in the corner of the iTerm pane being looked at |
+| `gaze --point` | ask the running daemon once and print its answer |
+| `gaze --demo 14 --record clip.mov` | the clip above: a target to follow, the gaze dot chasing it |
+| `gaze --units gpu` | run the models on the GPU instead of the Neural Engine |
+
+## The daemon
+
+`gaze --serve` listens on `~/Library/Application Support/gaze/gaze.sock`. Send it anything and it answers
+with one line: `x y laptop|external` in global screen points (the coordinates a mouse event takes), or
+`none no-face` / `none off-screen`.
+
+```bash
+gaze --serve --track &
+echo | nc -U ~/Library/Application\ Support/gaze/gaze.sock     # 812 440 laptop
+```
+
+It keeps the camera open (the green light stays on) and uses about 500 MB. It backs off to one look a
+second when nobody is in front of the camera, stops while the display sleeps, and picks up a recalibration
+or a monitor being plugged in without a restart.
+
+`./install.sh --daemon` runs it at login through MicBtn (`micbtn --gaze-serve`), because macOS gives the
+camera to an app and refuses a bare python under launchd. Started by hand from a terminal it uses the
+terminal's Camera permission instead. `--glow` reads where iTerm's panes are through Accessibility, which
+MicBtn (or the terminal) needs.
+
+## How it works
+
+1. [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) finds the face and
+   the head's pose in each camera frame.
+2. The face is warped to the ETH-XGaze normalized view and run through
+   [UniGaze](https://github.com/ut-vision/UniGaze) (ViT-H/14 and ViT-L/16, each on the face and on its
+   mirror image, averaged), which gives a 3D gaze direction.
+3. The gaze ray from the face is intersected with each screen. The laptop screen is the camera's own plane.
+   The external monitor's position and tilt are solved from its calibration dots and the physical size
+   macOS reports for it.
+4. Calibration fits eight physical numbers per person (eye-axis offset, angle gain, depth scale, camera
+   offset) and six per external monitor, not a black-box regression from landmarks to pixels. That is
+   why it survives you moving: distance is part of the geometry instead of a guess.
+
+## On the Neural Engine
+
+`convert.py` turns the two UniGaze models into Core ML with fp16 activations and int8 per-channel weights.
+Every operation of both lands on the Neural Engine. Measured on an M5 Pro, one face per call:
+
+| | ViT-H/14 | ViT-L/16 |
+|---|---|---|
+| Neural Engine | 55 ms, 0.15 J | 17 ms, 0.04 J |
+| GPU, idle | 17 ms | 12 ms |
+| GPU, shared with other work | 40 to 75 ms | about 30 ms |
+| file | 600 MB | 290 MB |
+
+- **Why the Neural Engine when the GPU is faster.** Only an idle GPU is faster. A tracker that runs all day
+  shares the GPU with everything else, and then it is slower and less steady than the Neural Engine, which
+  nothing else uses. Energy per inference is the same order on both.
+- **int8 weights** halve the files, run 15% faster on the Neural Engine than fp16 weights, and move the
+  output by under 0.04 degrees.
+- **A fraction of the work per frame.** The answer is the mean of four passes (two models, face and mirror
+  image). A cheaper subset differs from that mean by a slowly changing offset, so each frame runs only the
+  subset and adds the offset, and the rest run on one face every few seconds, one pass a frame, to keep
+  the offset current. Calibration and the live view run both straight passes (about 80 ms a frame; against
+  all four on live frames: no bias, 0.12 degrees of scatter). The tracking daemon runs ViT-L alone (about
+  35 ms a frame, 0.5 degrees of scatter, which the median over a fixation takes back out).
+- **Same answers as PyTorch.** All four passes through Core ML against the PyTorch ensemble on the same
+  live frames: 0.04 degrees of scatter, 0.10 worst.
+- **What did not help.** A batch of two is slower than two calls on the Neural Engine (154 ms against
+  2 x 55). The fused attention op (`scaled_dot_product_attention`) is no faster than the plain one.
+
+## Limits
+
+- One person, one desk: calibration is per person and per screen layout.
+- The built-in camera and at most one external monitor.
+- Tested on one machine (M5 Pro, macOS 26). Glasses, low light and a face far off to the side all cost
+  accuracy.
+- `--glow` knows iTerm2 only.
+- micbtn's button support is the DJI Mic Mini's receiver (USB vendor 0x2ca3). Other HID buttons need a
+  line in `micbtn/Support.swift`.
+
+## Licences
+
+The code here, gaze and micbtn, is MIT. The UniGaze weights it downloads are
+[non-commercial](https://github.com/ut-vision/UniGaze#license) (ModelGo MG-NC-RAI-2.0), and
+`face_model.txt` comes from the UniGaze repo, so check those terms before building a product on this.

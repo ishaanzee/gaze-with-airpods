@@ -1,0 +1,139 @@
+#!/bin/bash
+# claude-warm: Claude Code sessions started ahead of time, so a new pane is a running session at once.
+#
+# A cold `claude` takes ~0.3 s to draw its prompt, too slow for a pane that has to be up within 0.5 s of the
+# mic button. Each warm session is a `claude --model M` already running in DIR under dtach, detached. Taking
+# one moves it out of the pool and attaches the new pane to it; a replacement starts behind it. dtach passes
+# the terminal through untouched, so the pane keeps iTerm's own scrollback, mouse and selection.
+#
+#   claude-warm take MODEL DIR    print the command a new pane runs: attach to a warm session, else start cold
+#   claude-warm fill MODEL DIR    make sure one fresh warm session waits for MODEL in DIR
+#   claude-warm refresh           keep the recently used MODEL/DIR pairs warm, recycle stale ones, drop the rest
+#   claude-warm status | stop     list the warm and attached sessions | end every warm session
+#   claude-warm install           run refresh every 10 minutes under launchd
+#
+# A warm session is recycled after TTL: Claude Code reads CLAUDE.md, git status and the date when it starts.
+# Each one is a ~400 MB node process, so only the last KEEP pairs used in the last 3 days stay warm.
+set -uo pipefail
+
+ROOT="$HOME/Library/Caches/claude-warm"
+POOL="$ROOT/pool" LIVE="$ROOT/live" RECENT="$ROOT/recent"
+TTL=1800 KEEP=4
+DTACH=/opt/homebrew/bin/dtach
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+mkdir -p "$POOL" "$LIVE"
+
+slot() { local d="${2//\//%}"; echo "$POOL/$1/${d:-%}"; }        # the pool directory of one MODEL/DIR pair
+born() { local b="${1##*/}"; echo "${b%%.*}"; }                    # a socket's start time, from its name
+master() { pgrep -f -- "$DTACH -n [^ ]*/${1##*/} " | head -1; }  # the dtach holding a session (its name is unique; taking it moves it)
+
+end_session() {  # SOCKET: end the session and everything in it
+  local pid; pid="$(master "$1")"
+  [[ -n "$pid" ]] && kill "$pid" 2>/dev/null
+  rm -f "$1"
+}
+
+shell_for() {  # MODEL: what a session runs. The zsh function `claude` adds the usual flags; a shell is left after it
+  printf '%s' "claude --model $1; exec /bin/zsh -l"
+}
+
+case "${1:-}" in
+take)
+  model="$2" dir="$3" now="$(date +%s)"
+  for sock in "$(slot "$model" "$dir")"/*.sock; do
+    [[ -S "$sock" ]] || continue
+    (( now - $(born "$sock") < TTL )) || continue
+    taken="$LIVE/${sock##*/}"
+    mv "$sock" "$taken" 2>/dev/null || continue  # lost a race for it: try the next
+    echo "$SELF attach $taken"
+    nohup "$SELF" fill "$model" "$dir" </dev/null >/dev/null 2>&1 &
+    exit 0
+  done
+  echo "$SELF cold $model $dir"
+  nohup "$SELF" fill "$model" "$dir" </dev/null >/dev/null 2>&1 &
+  ;;
+attach)
+  # Closing the pane hangs up this script too: it lives on to end the session, or the detached claude would
+  # run forever with nobody attached.
+  trap '' HUP
+  "$DTACH" -a "$2" -E -r winch -z
+  end_session "$2"
+  ;;
+cold)
+  cd "$3" 2>/dev/null || cd
+  exec /bin/zsh -lic "$(shell_for "$2")"
+  ;;
+fill)
+  model="$2" dir="$3" now="$(date +%s)" s="$(slot "$2" "$3")"
+  [[ -d "$dir" ]] || exit 0
+  mkdir -p "$s"
+  printf '%s\t%s\t%s\n' "$now" "$model" "$dir" >> "$RECENT"
+  mkdir "$s.lock" 2>/dev/null || exit 0  # another fill is at it
+  trap 'rmdir "$s.lock"' EXIT
+  fresh=0
+  for sock in "$s"/*.sock; do
+    [[ -e "$sock" ]] || continue
+    if [[ -S "$sock" && -n "$(master "$sock")" ]] && (( now - $(born "$sock") < TTL - 120 )); then
+      fresh=1
+    else
+      end_session "$sock"
+    fi
+  done
+  (( fresh )) && exit 0
+  sock="$s/$now.$$.sock"
+  cd "$dir" && "$DTACH" -n "$sock" -r winch -z /bin/zsh -lic "$(shell_for "$model")"
+  ;;
+refresh)
+  [[ -f "$RECENT" ]] || exit 0
+  cutoff=$(( $(date +%s) - 3 * 86400 ))
+  # The last KEEP distinct pairs used since the cutoff, newest first; the file keeps only those.
+  keep="$(awk -F'\t' -v c="$cutoff" '$1 >= c' "$RECENT" | tail -r | awk -F'\t' '!seen[$2 FS $3]++' | head -n "$KEEP")"
+  printf '%s\n' "$keep" | tail -r | sed '/^$/d' > "$RECENT.new" && mv "$RECENT.new" "$RECENT"
+  wanted=""
+  while IFS=$'\t' read -r _ model dir; do
+    [[ -n "$model" ]] || continue
+    wanted+="$(slot "$model" "$dir")"$'\n'
+    "$SELF" fill "$model" "$dir"
+  done <<< "$keep"
+  for s in "$POOL"/*/*; do
+    [[ -d "$s" && "$s" != *.lock ]] || continue
+    grep -qxF "$s" <<< "$wanted" && continue
+    for sock in "$s"/*.sock; do [[ -e "$sock" ]] && end_session "$sock"; done
+    rmdir "$s" 2>/dev/null
+  done
+  ;;
+status)
+  now="$(date +%s)"
+  for sock in "$POOL"/*/*/*.sock "$LIVE"/*.sock; do
+    [[ -e "$sock" ]] || continue
+    state=warm; [[ "$sock" == "$LIVE"/* ]] && state=attached
+    [[ -n "$(master "$sock")" ]] || state="$state, dead"
+    printf '%-14s %5ss old  %s\n' "$state" "$(( now - $(born "$sock") ))" "${sock#"$ROOT"/}"
+  done
+  ;;
+stop)
+  for sock in "$POOL"/*/*/*.sock; do [[ -e "$sock" ]] && end_session "$sock"; done
+  ;;
+install)
+  plist="$HOME/Library/LaunchAgents/io.github.bhaktatejas922.claude-warm.plist"
+  cat > "$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>io.github.bhaktatejas922.claude-warm</string>
+  <key>ProgramArguments</key><array><string>$SELF</string><string>refresh</string></array>
+  <key>StartInterval</key><integer>600</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>$HOME/Library/Logs/claude-warm.log</string>
+  <key>StandardErrorPath</key><string>$HOME/Library/Logs/claude-warm.log</string>
+</dict></plist>
+EOF
+  launchctl bootout "gui/$(id -u)/io.github.bhaktatejas922.claude-warm" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$plist"
+  echo "claude-warm refreshes every 10 minutes ($plist)"
+  ;;
+*)
+  sed -n '2,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//'
+  exit 2
+  ;;
+esac
