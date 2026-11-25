@@ -25,7 +25,7 @@ enum Call {
 
     /// The apps that make this a call, out of everything with a mic open.
     static func others(in all: [String]) -> [String] {
-        all.filter { id in !id.isEmpty && !ignored.contains { id.hasPrefix($0) } }
+        all.filter { id in !ignored.contains { id.hasPrefix($0) } }.map { $0.isEmpty ? "a command-line tool" : $0 }
     }
 
     /// The apps in a call right now; empty when there is none. As of the last look, at most `every` seconds ago.

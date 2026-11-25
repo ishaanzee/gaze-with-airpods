@@ -52,6 +52,16 @@ and while another app is really playing, the button is that app's. The headset a
 AirPods that have switched to a nearby iPhone send their presses there (`--media-silence` keeps a silent
 stream running to hold them here).
 
+**Calls.** While another app has a microphone open (FaceTime, Zoom, a browser call), the button stands down
+and the eye tracker lets go of the camera; both come back when the mic closes. `micbtn --mics` says what it
+sees; `--call-ignore <bundle id prefix>` exempts an app, `--no-call-pause` turns it off.
+
+**One squeeze.** `--auto-send 1.5` ends dictation and sends once you have been quiet for 1.5 s, so a single
+squeeze does the whole round. A second squeeze still ends it at once.
+
+**Staying up.** The login jobs run `micbtn --supervise`, which restarts micbtn and the gaze daemon itself:
+a macOS 27 login session can get stuck in launchd's "on-demand-only mode", where KeepAlive never fires.
+
 **Finding a button.** `micbtn/probe/probe.sh media 40` becomes the Now Playing app and logs every command,
 media key, HID value and SteelSeries report for 40 seconds: press each button a few times and read what
 came out. `probe.sh mic 40` does the same with the microphone open, for buttons that only mean something

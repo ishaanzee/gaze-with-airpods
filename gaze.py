@@ -545,12 +545,10 @@ def serve(cam, gaze, a):
     srv.bind(SOCK); os.chmod(SOCK, 0o600); srv.listen(4)
     print(f"serving on {SOCK}" + (f", tracking at up to {a.fps:g} fps" if track else ", on demand") + (", a dot on the terminal pane looked at" if glow else ""), flush=True)
     hist, why, seen = [], "no-face", time.time()
-    # MicBtn, which runs this daemon, says when a call starts and ends (micbtn/Call.swift): the camera is
-    # let go for as long as it lasts, and every answer is "none in-call".
-    import signal
+    # MicBtn, which runs this daemon, says when a call starts and ends (micbtn/Call.swift) by keeping a file
+    # there for as long as it lasts: the camera is let go, and every answer is "none in-call".
     call = {"on": False}
-    signal.signal(signal.SIGUSR1, lambda *_: call.update(on=True))
-    signal.signal(signal.SIGUSR2, lambda *_: call.update(on=False))
+    flag = os.path.join(os.path.dirname(SOCK), "in-call")
 
     def look():
         """One camera frame through the model, into the history."""
@@ -582,6 +580,7 @@ def serve(cam, gaze, a):
             t0 = time.time()
             tr.refresh()
             asleep = bool(Quartz.CGDisplayIsAsleep(Quartz.CGMainDisplayID())) or tr.mapper is None
+            call["on"] = os.path.exists(flag)
             if call["on"] and cam.cap is not None:
                 cam.close(); hist.clear(); why = "in-call"
                 print(f"{time.strftime('%H:%M:%S')} in a call: the camera is released", flush=True)

@@ -163,6 +163,7 @@ write_job() {
   <key>Label</key><string>$label</string>
   <key>ProgramArguments</key><array>
     <string>$BIN</string>
+    <string>--supervise</string>
 EOF
     for arg in "$@"; do printf '    <string>%s</string>\n' "$arg"; done
     cat <<EOF

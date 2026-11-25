@@ -83,25 +83,34 @@ enum Gaze {
             sleep(30)
             exit(1)
         }
-        let daemon = Process()
-        daemon.executableURL = URL(fileURLWithPath: "/bin/sh")
-        daemon.arguments = ["-c", "exec " + command]
+        // launchd cannot be relied on to start it again (a login session stuck in "on-demand-only mode" never
+        // does: macOS 27), so the daemon is restarted from here, for as long as MicBtn runs.
+        var daemon: Process?
         signal(SIGTERM, SIG_IGN)
         let terminated = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
-        terminated.setEventHandler { daemon.terminate() }
+        terminated.setEventHandler { daemon?.terminate(); exit(0) }
         terminated.resume()
-        do { try daemon.run() } catch {
-            log("cannot run \(command): \(error.localizedDescription)")
-            exit(1)
-        }
-        // In a call the daemon lets go of the camera (SIGUSR1) and takes it back after (SIGUSR2): Call.swift.
+        // In a call the daemon lets go of the camera: it looks for this file (Call.swift says when).
+        let inCall = (socketPath as NSString).deletingLastPathComponent + "/in-call"
+        try? FileManager.default.removeItem(atPath: inCall)
         Call.watch { apps in
             log(apps.isEmpty ? "the call is over: gaze resumes" : "in a call (\(apps.joined(separator: ", "))): gaze pauses")
-            kill(daemon.processIdentifier, apps.isEmpty ? SIGUSR2 : SIGUSR1)
+            if apps.isEmpty { try? FileManager.default.removeItem(atPath: inCall) } else { FileManager.default.createFile(atPath: inCall, contents: nil) }
         }
         DispatchQueue.global().async {
-            daemon.waitUntilExit()
-            exit(daemon.terminationStatus)
+            while true {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/sh")
+                process.arguments = ["-c", "exec " + command]
+                do { try process.run() } catch {
+                    log("cannot run \(command): \(error.localizedDescription)")
+                    exit(1)
+                }
+                daemon = process
+                process.waitUntilExit()
+                log("the gaze daemon ended (\(process.terminationStatus)): starting it again in 5 s")
+                sleep(5)
+            }
         }
         dispatchMain()
     }

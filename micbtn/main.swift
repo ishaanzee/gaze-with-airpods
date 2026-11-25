@@ -69,6 +69,29 @@ if has("--self-test") {
     exit(failures.isEmpty ? 0 : 1)
 }
 
+// MARK: staying up
+
+// `micbtn --supervise <arguments>` runs micbtn with those arguments and starts it again whenever it ends.
+// micbtn ends on purpose to pick up a permission or a replugged mic, and counts on being started again.
+// launchd's KeepAlive used to do that; a login session stuck in "on-demand-only mode" (seen on macOS 27,
+// `launchctl print` says "pended nondemand spawn") never starts a job again, so the job is this loop.
+if has("--supervise") {
+    var child: Process?
+    signal(SIGTERM, SIG_IGN)
+    let ended = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+    ended.setEventHandler { child?.terminate(); child?.waitUntilExit(); exit(0) }
+    ended.resume()
+    while true {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        process.arguments = CommandLine.arguments.dropFirst().filter { $0 != "--supervise" }
+        do { try process.run() } catch { print("cannot start micbtn: \(error.localizedDescription)"); exit(1) }
+        child = process
+        process.waitUntilExit()
+        sleep(2)
+    }
+}
+
 if has("--mics") {
     let all = DictationMic.everyone()
     print(all.isEmpty ? "no app has a mic open" : all.joined(separator: "\n"))
