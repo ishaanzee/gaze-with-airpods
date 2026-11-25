@@ -3,12 +3,13 @@
 // the same as the second press: dictation off, then Enter when the text has landed, in the pane the first
 // press picked. A second press still ends it at once.
 //
-// It listens to the default input only while dictation is running, and only to how loud it is: speech is
-// anything well over the quietest level heard so far. A headset mic with noise suppression (AirPods) goes
-// nearly silent between words, which is what makes a short wait safe. Nothing said at all for `voiceIdle`
+// It listens to the Mac's built-in mic only while dictation is running, and only to how loud it is: speech
+// is anything well over the quietest level heard so far. (Not the headset's mic: opening that puts
+// AirPods in call mode, and whatever is playing gets louder.) Nothing said at all for `voiceIdle`
 // ends it too, so a press by mistake never leaves dictation running.
 
 import AVFoundation
+import CoreAudio
 import Foundation
 
 let autoSend = has("--auto-send") ? number("--auto-send", 1.5) : 0  // seconds of quiet after speech; 0 is off
@@ -48,9 +49,33 @@ final class VoiceEnd {
         engine = nil
     }
 
+    /// The Mac's own microphone. Opening a Bluetooth headset's mic puts it in call mode: whatever is playing
+    /// gets louder and worse for as long as dictation runs. `--auto-send-mic default` listens to the system
+    /// default input instead.
+    private static func builtInMic() -> AudioDeviceID? {
+        func address(_ selector: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
+            AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+        }
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var at = address(kAudioHardwarePropertyDevices), size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(system, &at, 0, nil, &size) == noErr else { return nil }
+        var devices = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(system, &at, 0, nil, &size, &devices) == noErr else { return nil }
+        return devices.first { device in
+            var transport: UInt32 = 0, n = UInt32(MemoryLayout<UInt32>.size)
+            var kind = address(kAudioDevicePropertyTransportType)
+            guard AudioObjectGetPropertyData(device, &kind, 0, nil, &n, &transport) == noErr, transport == kAudioDeviceTransportTypeBuiltIn else { return false }
+            var streams = address(kAudioDevicePropertyStreams, kAudioObjectPropertyScopeInput), bytes: UInt32 = 0
+            return AudioObjectGetPropertyDataSize(device, &streams, 0, nil, &bytes) == noErr && bytes > 0
+        }
+    }
+
     private func listen() {
         let engine = AVAudioEngine()
         let input = engine.inputNode
+        if (flag("--auto-send-mic") ?? "builtin") != "default", let mic = VoiceEnd.builtInMic() {
+            do { try input.auAudioUnit.setDeviceID(mic) } catch { log("--auto-send: cannot pick the built-in mic (\(error.localizedDescription)): using the default input") }
+        }
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { return log("--auto-send: no input to listen to; press again to send") }
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
