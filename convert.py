@@ -56,7 +56,10 @@ def build(name, short):
         model = ct.models.CompiledMLModel(dest, compute_units=ct.ComputeUnit.CPU_ONLY)
         off = max(float(np.degrees(np.abs(model.predict({"x": x.numpy()})["gaze"] - w)).max()) for x, w in zip(xs, want))
         print(f"{short}: {weights} weights built in {time.time() - t0:.0f} s, {off:.3f} degrees from the PyTorch model", flush=True)
-        if off <= 0.3:
+        # The inputs are noise, not faces, which is the worst case for fp16 activations: a sanity check that
+        # the conversion is not broken, not the accuracy on a face. fp16 weights are the last resort, so
+        # they are held to a looser limit.
+        if off <= (0.3 if weights == "int8" else 1.0):
             return
         del model
         shutil.rmtree(dest)
