@@ -74,6 +74,7 @@ cat > "$PLIST" <<PLIST
 PLIST
 : > "$LOG"
 launchctl bootstrap "$DOMAIN" "$PLIST"
+launchctl kickstart "$DOMAIN/$LABEL" 2>/dev/null || true  # macOS 27 leaves a freshly bootstrapped job pending
 echo "starting the daemon (log: $LOG); allow the Camera prompt for MicBtn if macOS shows one"
 for _ in $(seq 120); do
   grep -q "serving on" "$LOG" && break

@@ -169,6 +169,7 @@ EOF
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Interactive</string>
   <key>ThrottleInterval</key><integer>5</integer>
   <key>StandardOutPath</key><string>$log</string>
   <key>StandardErrorPath</key><string>$log</string>
@@ -177,6 +178,8 @@ EOF
   } > "$plist"
   : > "$log"
   launchctl bootstrap "$DOMAIN" "$plist"
+  # macOS 27 leaves a freshly bootstrapped job pending ("pended nondemand spawn") instead of running it.
+  launchctl kickstart "$DOMAIN/$label" 2>/dev/null || true
 }
 
 # --no-analog: no push-to-talk mic to listen for, only a button (an AirPods stem, a headset's dongle). Without

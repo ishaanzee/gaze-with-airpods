@@ -7,6 +7,7 @@
 
 import AppKit
 import ApplicationServices
+import AVFoundation
 import Foundation
 
 final class ButtonMode {
@@ -17,6 +18,7 @@ final class ButtonMode {
     private var pressAt = 0.0, micCheckTook = 0.0  // the last click, for the timing line
     private let button: ButtonSource = buttonSource == "media" ? MediaButton() : HIDButton()
     private let insertion = Insertion(dictationKey: keyCode)
+    private let voice = VoiceEnd()
     private let keys = DispatchQueue(label: "micbtn.keys", qos: .userInteractive)
     private let commands: [Int: String]
     private var device = ""
@@ -37,6 +39,18 @@ final class ButtonMode {
         }
         guard levelsOnly || DictationMic.start() else { return blocked("CoreAudio will not say when \(dictationApp) opens the mic", until: { false }) }
         guard insertion.start() else { return blocked("cannot watch for the dictated text: check MicBtn under Accessibility", until: { false }) }
+        if autoSend > 0 {
+            guard VoiceEnd.allowed() else {
+                return blocked("--auto-send needs Microphone: allow MicBtn in System Settings > Privacy & Security > Microphone") {
+                    AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+                }
+            }
+            voice.onQuiet = { [self] why in
+                guard clicks.state == .armed else { return }
+                log("auto-send: " + why)
+                handle(.click)
+            }
+        }
         insertion.onInserted = { [self] in handle(.inserted) }
         insertion.onEndedElsewhere = { [self] in handle(.endedElsewhere) }
         button.onClick = { [self] time in handle(.click, at: time) }
@@ -206,6 +220,7 @@ final class ButtonMode {
         }
         micWatch?.invalidate()
         micWatch = nil
+        if autoSend > 0 { state == .armed ? voice.start() : voice.stop() }
         switch state {
         case .idle: break
         case .armed:
