@@ -31,28 +31,36 @@ class Head(torch.nn.Module):
 
 def build(name, short):
     dest = os.path.join(STATE, short + ".mlmodelc")
+    if os.path.isdir(dest):
+        return print(f"{short}: already built", flush=True)
     t0 = time.time()
     net = Head(unigaze.load(name, device="cpu").float().eval()).eval()
-    x = torch.randn(1, 3, 224, 224)
+    torch.manual_seed(0)
+    xs = [torch.randn(1, 3, 224, 224) for _ in range(4)]
     with torch.no_grad():
-        want = net(x).numpy()
-    ml = ct.convert(torch.jit.trace(net, x, strict=False), inputs=[ct.TensorType(name="x", shape=x.shape)],
-                    outputs=[ct.TensorType(name="gaze")], convert_to="mlprogram",
-                    compute_precision=ct.precision.FLOAT16, minimum_deployment_target=ct.target.macOS15)
-    ml = cto.linear_quantize_weights(ml, cto.OptimizationConfig(global_config=cto.OpLinearQuantizerConfig(
+        want = [net(x).numpy() for x in xs]
+    fp16 = ct.convert(torch.jit.trace(net, xs[0], strict=False), inputs=[ct.TensorType(name="x", shape=xs[0].shape)],
+                      outputs=[ct.TensorType(name="gaze")], convert_to="mlprogram",
+                      compute_precision=ct.precision.FLOAT16, minimum_deployment_target=ct.target.macOS15)
+    int8 = cto.linear_quantize_weights(fp16, cto.OptimizationConfig(global_config=cto.OpLinearQuantizerConfig(
         mode="linear_symmetric", dtype="int8", granularity="per_channel")))
-    with tempfile.TemporaryDirectory() as tmp:
-        pkg = os.path.join(tmp, short + ".mlpackage")
-        ml.save(pkg)
-        loaded = ct.models.MLModel(pkg, compute_units=ct.ComputeUnit.CPU_ONLY)  # its compiled copy lives as long as it does
-        shutil.rmtree(dest, ignore_errors=True)
-        shutil.copytree(loaded.get_compiled_model_path(), dest)
-    got = ct.models.CompiledMLModel(dest, compute_units=ct.ComputeUnit.CPU_ONLY).predict({"x": x.numpy()})["gaze"]
-    off = float(np.degrees(np.abs(got - want)).max())
-    print(f"{short}: built in {time.time() - t0:.0f} s, {off:.3f} degrees from the PyTorch model", flush=True)
-    if off > 0.3:
+    # int8 weights first (half the file, faster on the Neural Engine). Where they move the answer too far
+    # (0.5 degrees for ViT-L on an M3 Pro, macOS 27; upstream measured 0.04 on an M5 Pro), fp16 weights.
+    for weights, ml in (("int8", int8), ("fp16", fp16)):
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = os.path.join(tmp, short + ".mlpackage")
+            ml.save(pkg)
+            loaded = ct.models.MLModel(pkg, compute_units=ct.ComputeUnit.CPU_ONLY)  # its compiled copy lives as long as it does
+            shutil.rmtree(dest, ignore_errors=True)
+            shutil.copytree(loaded.get_compiled_model_path(), dest)
+        model = ct.models.CompiledMLModel(dest, compute_units=ct.ComputeUnit.CPU_ONLY)
+        off = max(float(np.degrees(np.abs(model.predict({"x": x.numpy()})["gaze"] - w)).max()) for x, w in zip(xs, want))
+        print(f"{short}: {weights} weights built in {time.time() - t0:.0f} s, {off:.3f} degrees from the PyTorch model", flush=True)
+        if off <= 0.3:
+            return
+        del model
         shutil.rmtree(dest)
-        sys.exit(f"{short}: the converted model is {off:.2f} degrees off: not kept")
+    sys.exit(f"{short}: the converted model is {off:.2f} degrees off: not kept")
 
 
 if __name__ == "__main__":
