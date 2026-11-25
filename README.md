@@ -42,7 +42,7 @@ gaze daemon, micbtn dictates into whatever has focus, as a plain button.
 
 | Headset | How its button reaches the Mac | Flags | State |
 |---|---|---|---|
-| AirPods (stem), any Bluetooth headset's play/pause | a play/pause command (AVRCP), which macOS gives to the Now Playing app; MicBtn claims to be it | `--button-source media` | built; not yet confirmed with a real press |
+| AirPods (stem), any Bluetooth headset's play/pause | a play/pause command (AVRCP), which macOS gives to the Now Playing app; MicBtn claims to be it | `--button-source media` | confirmed on AirPods Pro (macOS 27): each squeeze arrives as one `pause` command |
 | SteelSeries Arctis Nova 7, over its USB-C dongle | unknown until probed: a HID report from the dongle (vendor 0x1038), or nothing | `--button-vendor 1038 --button-usage PAGE:USAGE` | needs the probe below |
 | SteelSeries Arctis Nova 7, over Bluetooth | its Bluetooth button is play/pause | `--button-source media` | same as AirPods |
 | DJI Mic Mini | Volume Up from the receiver | none | upstream's, unchanged |
