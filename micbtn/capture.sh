@@ -6,9 +6,9 @@ set -euo pipefail
 BIN="$HOME/Applications/MicBtn.app/Contents/MacOS/micbtn"
 DIR="$HOME/Library/Application Support/micbtn/corpus/$(date +%Y%m%d-%H%M)"
 DOMAIN="gui/$(id -u)"
-PLIST="$HOME/Library/LaunchAgents/io.github.bhaktatejas922.micbtn.plist"
+PLIST="$HOME/Library/LaunchAgents/io.github.ishaanzee.micbtn.plist"
 [[ -x "$BIN" ]] || { echo "micbtn is not installed: run install.sh first" >&2; exit 1; }
-launchctl bootout "$DOMAIN/io.github.bhaktatejas922.micbtn" 2>/dev/null || true
+launchctl bootout "$DOMAIN/io.github.ishaanzee.micbtn" 2>/dev/null || true
 trap 'launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null || true' EXIT
 "$BIN" --capture "$DIR"
 "$BIN" --eval "$DIR" || true

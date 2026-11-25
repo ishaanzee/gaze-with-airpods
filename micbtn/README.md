@@ -1,5 +1,11 @@
 # micbtn: a mic's talk button as a keyboard key
 
+> This fork adds a headset's own button as a click (`--button --button-source media`: an AirPods stem, any
+> Bluetooth play/pause button; `--button-vendor`/`--button-usage` for a USB receiver), `--no-analog` to
+> install the button alone, and Ghostty in place of iTerm for the split. The top-level README has the
+> table; `MediaButton.swift` says how it works. Everything below is upstream's text, where "iTerm" now
+> means Ghostty for `claude-split.sh`.
+
 Hold the button on a push-to-talk mic and the Mac sees Fn held (or any key you pick). Let go and the key
 comes up. One button opens the mic and starts dictation.
 
@@ -91,7 +97,7 @@ Two things make that possible:
 The DJI Mic Mini is the opposite kind of mic: always live, so there is no dead line to read a click off,
 and its receiver reports the transmitter's **linking button** over USB as a Volume Up key, down and up a
 millisecond apart. There is no hold to read. So the button is a toggle around the dictation app's
-hands-free mode, and it runs as a second process (`micbtn --button`, launchd job `io.github.bhaktatejas922.micbtn.button`)
+hands-free mode, and it runs as a second process (`micbtn --button`, launchd job `io.github.ishaanzee.micbtn.button`)
 that reads no audio and shares nothing with the analog mic's process.
 
 | You do | It does |
@@ -259,7 +265,7 @@ leaves this Mac, and `--no-suspects` turns it off.
 
 - `waiting: no USB input plugged in` with the mic plugged in: the Mac does not see it as a USB input.
   `micbtn --inputs` lists what it sees.
-- Nothing in the log at all: it is not running. `launchctl print gui/$(id -u)/io.github.bhaktatejas922.micbtn` should say
+- Nothing in the log at all: it is not running. `launchctl print gui/$(id -u)/io.github.ishaanzee.micbtn` should say
   `state = running`; re-run the installer if it is missing. Run it only through the installer, never as a
   loose binary: only the launchd job restarts it after an unplug, sleep or reboot.
 - No `down` on a press: the click is under 100x the floor. Lower `--on` (try 50). Too low and a knock on

@@ -4,7 +4,7 @@
 # A cold `claude` takes ~0.3 s to draw its prompt, too slow for a pane that has to be up within 0.5 s of the
 # mic button. Each warm session is a `claude --model M` already running in DIR under dtach, detached. Taking
 # one moves it out of the pool and attaches the new pane to it; a replacement starts behind it. dtach passes
-# the terminal through untouched, so the pane keeps iTerm's own scrollback, mouse and selection.
+# the terminal through untouched, so the pane keeps the terminal's own scrollback, mouse and selection.
 #
 #   claude-warm take MODEL DIR    print the command a new pane runs: attach to a warm session, else start cold
 #   claude-warm fill MODEL DIR    make sure one fresh warm session waits for MODEL in DIR
@@ -19,7 +19,7 @@ set -uo pipefail
 ROOT="$HOME/Library/Caches/claude-warm"
 POOL="$ROOT/pool" LIVE="$ROOT/live" RECENT="$ROOT/recent"
 TTL=1800 KEEP=4
-DTACH=/opt/homebrew/bin/dtach
+DTACH="$(command -v dtach || echo /opt/homebrew/bin/dtach)"  # without dtach every pane starts cold
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 mkdir -p "$POOL" "$LIVE"
 
@@ -65,7 +65,7 @@ cold)
   ;;
 fill)
   model="$2" dir="$3" now="$(date +%s)" s="$(slot "$2" "$3")"
-  [[ -d "$dir" ]] || exit 0
+  [[ -d "$dir" && -x "$DTACH" ]] || exit 0
   mkdir -p "$s"
   printf '%s\t%s\t%s\n' "$now" "$model" "$dir" >> "$RECENT"
   mkdir "$s.lock" 2>/dev/null || exit 0  # another fill is at it
@@ -115,12 +115,12 @@ stop)
   for sock in "$POOL"/*/*/*.sock; do [[ -e "$sock" ]] && end_session "$sock"; done
   ;;
 install)
-  plist="$HOME/Library/LaunchAgents/io.github.bhaktatejas922.claude-warm.plist"
+  plist="$HOME/Library/LaunchAgents/io.github.ishaanzee.claude-warm.plist"
   cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>io.github.bhaktatejas922.claude-warm</string>
+  <key>Label</key><string>io.github.ishaanzee.claude-warm</string>
   <key>ProgramArguments</key><array><string>$SELF</string><string>refresh</string></array>
   <key>StartInterval</key><integer>600</integer>
   <key>RunAtLoad</key><true/>
@@ -128,7 +128,7 @@ install)
   <key>StandardErrorPath</key><string>$HOME/Library/Logs/claude-warm.log</string>
 </dict></plist>
 EOF
-  launchctl bootout "gui/$(id -u)/io.github.bhaktatejas922.claude-warm" 2>/dev/null || true
+  launchctl bootout "gui/$(id -u)/io.github.ishaanzee.claude-warm" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$plist"
   echo "claude-warm refreshes every 10 minutes ($plist)"
   ;;

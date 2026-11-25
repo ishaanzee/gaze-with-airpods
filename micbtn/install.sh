@@ -11,7 +11,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP="$HOME/Applications/MicBtn.app"
 BIN="$APP/Contents/MacOS/micbtn"
-LABEL="io.github.bhaktatejas922.micbtn"
+LABEL="io.github.ishaanzee.micbtn"
 DOMAIN="gui/$(id -u)"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/micbtn.log"
@@ -87,7 +87,7 @@ build_app() {
   <key>LSUIElement</key><true/>
   <key>NSCameraUsageDescription</key><string>micbtn runs the eye tracker (gaze) that tells it which window you are looking at when you start dictating.</string>
   <key>NSMicrophoneUsageDescription</key><string>micbtn reads the mic's level to tell when its talk button is held.</string>
-  <key>NSAppleEventsUsageDescription</key><string>micbtn's --double command drives other apps, such as splitting an iTerm pane.</string>
+  <key>NSAppleEventsUsageDescription</key><string>micbtn's --double command drives other apps, such as splitting a Ghostty pane.</string>
 </dict></plist>
 EOF
   signing_identity
@@ -179,11 +179,20 @@ EOF
   launchctl bootstrap "$DOMAIN" "$plist"
 }
 
-write_job "$LABEL" "$PLIST" "$LOG" --trace "$TRACE" "$@"
+# --no-analog: no push-to-talk mic to listen for, only a button (an AirPods stem, a headset's dongle). Without
+# it the analog job would take any USB headset's always-live mic for a talk button's line.
+analog=1
+for arg in "$@"; do [[ "$arg" == --no-analog ]] && analog=0; done
+if (( analog )); then
+  write_job "$LABEL" "$PLIST" "$LOG" --trace "$TRACE" "$@"
+else
+  rm -f "$PLIST"
+  LOG="$BUTTON_LOG"
+fi
 
 # The button job only exists when it has something to do. Each job reads the flags that are its own.
 button=0
-for arg in "$@"; do [[ "$arg" == --click || "$arg" == --triple-click ]] && button=1; done
+for arg in "$@"; do [[ "$arg" == --click || "$arg" == --triple-click || "$arg" == --button-source || "$arg" == --button-vendor ]] && button=1; done
 if (( button )); then
   write_job "$BUTTON_LABEL" "$BUTTON_PLIST" "$BUTTON_LOG" --button "$@"
 else

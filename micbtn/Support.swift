@@ -36,7 +36,20 @@ let doubleTimeout = 5.0                               // seconds before a --doub
 
 // Clicks: a button that reports each press over HID (`--button`).
 let rawHID = has("--raw")                              // --button --raw: log every report from every interface the receiver has
-let buttonVendor = 0x2ca3                             // DJI: the Mic Mini receiver's linking button arrives as a Volume Up click
+// Which button: `--button-source hid` (a USB receiver's report, the default) or `media` (a headset's play/pause
+// over Bluetooth: an AirPods stem, any AVRCP headset; MediaButton.swift).
+let buttonSource = (flag("--button-source") ?? "hid").lowercased()
+func hex(_ name: String) -> Int? { flag(name).flatMap { Int($0.replacingOccurrences(of: "0x", with: ""), radix: 16) } }
+let djiVendor = 0x2ca3                                // DJI: the Mic Mini receiver's linking button arrives as a Volume Up click
+let buttonVendor = hex("--button-vendor") ?? djiVendor  // 0x1038 is SteelSeries
+/// The HID usage that is the click, as `--button-usage page:usage` in hex. Volume Up (c:e9) by default.
+let buttonUsage: (page: Int, usage: Int) = {
+    let parts = (flag("--button-usage") ?? "c:e9").split(separator: ":").compactMap { Int($0.replacingOccurrences(of: "0x", with: ""), radix: 16) }
+    return parts.count == 2 ? (parts[0], parts[1]) : (0xc, 0xe9)
+}()
+/// Seized, a device's reports are ours alone (no volume change on every click). Only where that is known to
+/// be harmless: the DJI receiver. A headset's own volume wheel has to keep working.
+let seizeButton = has("--seize") || (buttonVendor == djiVendor && !has("--no-seize"))
 let clickTerm = number("--click-term", 1500) / 1000   // from one click to the next of the same burst: the third runs --triple-click
 let armedTimeout = number("--armed-timeout", 600)     // seconds of dictation with no click before the button forgets it
 let insertTimeout = number("--insert-timeout", 20)    // seconds to wait for dictated text to land before giving up on Enter

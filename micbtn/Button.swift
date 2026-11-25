@@ -15,7 +15,7 @@ final class ButtonMode {
     private var micWatch: Timer?  // runs while armed: sees the dictation end with no click
     private var micSeen = false, micDoubted = false
     private var pressAt = 0.0, micCheckTook = 0.0  // the last click, for the timing line
-    private let button = HIDButton()
+    private let button: ButtonSource = buttonSource == "media" ? MediaButton() : HIDButton()
     private let insertion = Insertion(dictationKey: keyCode)
     private let keys = DispatchQueue(label: "micbtn.keys", qos: .userInteractive)
     private let commands: [Int: String]
@@ -30,7 +30,7 @@ final class ButtonMode {
 
     func start() {
         guard levelsOnly || AXIsProcessTrusted() else { return waitForAccessibility() }
-        guard HIDButton.allowed(asking: true) else {
+        guard buttonSource == "media" || HIDButton.allowed(asking: true) else {
             return blocked("needs Input Monitoring: turn on MicBtn in System Settings > Privacy & Security > Input Monitoring") {
                 HIDButton.allowed(asking: false)
             }

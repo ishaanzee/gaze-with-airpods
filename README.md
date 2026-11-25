@@ -1,43 +1,61 @@
 # gaze
 
-Mind computer interfacing for multi agent coordination: look at an agent's pane, click the mic button,
-talk. The words go to the agent you were looking at. No mouse, no keyboard, no window switching.
+Look at an agent's pane, press the button on your headset, talk. The words go to the agent you were looking
+at. No mouse, no keyboard, no window switching.
 
-![iTerm panes following the eyes, and a DJI Mic Mini click dictating into the one looked at](demo-panes.gif)
+A fork of [bhaktatejas922/gaze](https://github.com/bhaktatejas922/gaze) (MIT) with two changes:
 
-A small blue dot sits in the corner of the iTerm pane you are looking at. One click of the DJI Mic Mini
-starts dictation into that pane; the next click sends it. (Rendered illustration of the flow; the faint
-ring marks where the eyes are and is drawn for the clip only. [mp4](demo-panes.mp4))
+- **Ghostty** instead of iTerm: the dot on the pane you look at, and the new-pane split, work in Ghostty 1.3+
+  (iTerm panes are still recognised by the dot).
+- **A headset button** instead of the DJI Mic Mini: an AirPods stem, or any Bluetooth headset's play/pause
+  button (`--button-source media`), and a USB receiver's button by vendor and usage (`--button-vendor`,
+  `--button-usage`). The DJI receiver still works as before.
 
 Two parts:
 
 - **gaze** (this directory): webcam eye tracking for the Mac. Where on your screens you are looking, from
   the built-in camera, on the laptop display and one external monitor, run on the Neural Engine. Expect
   one to two centimetres of error: enough to pick a pane or a window, not a word.
-- **[micbtn](micbtn/)**: turns the **DJI Mic Mini**'s button into dictation. One click asks gaze where you
-  are looking, clicks there and starts hands-free dictation; the next click ends it and presses Enter once
-  the text has landed. **A DJI Mic Mini is required** for this part: its receiver reports the transmitter's
-  button over USB, which is what micbtn reads. (micbtn also turns an analog push-to-talk mic's button into
-  a held key; see its README.)
+- **[micbtn](micbtn/)**: turns the button into dictation. One press asks gaze where you are looking, clicks
+  there and starts hands-free dictation; the next press ends it and presses Enter once the text has landed.
 
 ## Install
 
-Apple silicon, macOS 15 or later, [uv](https://docs.astral.sh/uv/), Xcode command line tools, a DJI Mic
-Mini with its receiver plugged in, and a dictation app that starts hands-free on a double Fn press
-(Granola by default; `--dictation-app` names another).
+Apple silicon, macOS 15 or later, [uv](https://docs.astral.sh/uv/), Xcode command line tools, Ghostty 1.3+,
+and a dictation app with a hands-free shortcut on Fn+Space (Wispr Flow: `--dictation-app com.electron.wispr-flow`;
+Granola is the default).
 
 ```bash
-git clone https://github.com/bhaktatejas922/gaze && cd gaze
 ./install.sh                 # gaze: python environment, Core ML models (~3 GB download, a few minutes, once)
 gaze                         # calibrate, then a live gaze dot on every screen
-./micbtn/install.sh --triple-click "$PWD/micbtn/claude-split.sh claude-opus-5-5"   # the mic button
-./install.sh --daemon --glow # gaze at login, run by MicBtn; the dot on the iTerm pane you look at
+./micbtn/install.sh --no-analog --button-source media --dictation-app com.electron.wispr-flow \
+  --triple-click "$PWD/micbtn/claude-split.sh claude-opus-5-5"     # AirPods stem
+./install.sh --daemon --glow # gaze at login, run by MicBtn; the dot on the Ghostty pane you look at
 ```
 
-Allow Microphone, Accessibility, Input Monitoring and Camera for MicBtn as the installers ask. Then look at
-a pane and click. Three clicks open a new pane with Claude Code in it (`claude-split.sh`); drop
+Allow Accessibility, Input Monitoring and Camera for MicBtn as the installers ask. Then look at a pane and
+squeeze the stem. Three squeezes open a new pane with Claude Code in it (`claude-split.sh`); drop
 `--triple-click` for dictation only. `micbtn --gaze` prints where gaze thinks you are looking. Without the
 gaze daemon, micbtn dictates into whatever has focus, as a plain button.
+
+## Which button
+
+| Headset | How its button reaches the Mac | Flags | State |
+|---|---|---|---|
+| AirPods (stem), any Bluetooth headset's play/pause | a play/pause command (AVRCP), which macOS gives to the Now Playing app; MicBtn claims to be it | `--button-source media` | built; not yet confirmed with a real press |
+| SteelSeries Arctis Nova 7, over its USB-C dongle | unknown until probed: a HID report from the dongle (vendor 0x1038), or nothing | `--button-vendor 1038 --button-usage PAGE:USAGE` | needs the probe below |
+| SteelSeries Arctis Nova 7, over Bluetooth | its Bluetooth button is play/pause | `--button-source media` | same as AirPods |
+| DJI Mic Mini | Volume Up from the receiver | none | upstream's, unchanged |
+
+`--button-source media` costs what a music player costs: the keyboard's play/pause key goes to MicBtn too,
+and while another app is really playing, the button is that app's. The headset also has to be on this Mac:
+AirPods that have switched to a nearby iPhone send their presses there (`--media-silence` keeps a silent
+stream running to hold them here).
+
+**Finding a button.** `micbtn/probe/probe.sh media 40` becomes the Now Playing app and logs every command,
+media key, HID value and SteelSeries report for 40 seconds: press each button a few times and read what
+came out. `probe.sh mic 40` does the same with the microphone open, for buttons that only mean something
+then (the AirPods mute gesture, a mute button that zeroes the audio).
 
 ## Accuracy
 
@@ -69,7 +87,7 @@ or the monitor moves.
 | `gaze --recalibrate` | calibrate again from scratch |
 | `gaze --serve` | no window: answer "where are they looking?" on a local socket, looking only when asked |
 | `gaze --serve --track` | follow the eyes 20 times a second, so an answer is instant |
-| `gaze --serve --glow` | `--track`, plus a small dot in the corner of the iTerm pane being looked at |
+| `gaze --serve --glow` | `--track`, plus a small dot in the corner of the Ghostty pane being looked at |
 | `gaze --point` | ask the running daemon once and print its answer |
 | `gaze --demo 14 --record clip.mov` | the clip above: a target to follow, the gaze dot chasing it |
 | `gaze --units gpu` | run the models on the GPU instead of the Neural Engine |
@@ -91,7 +109,7 @@ or a monitor being plugged in without a restart.
 
 `./install.sh --daemon` runs it at login through MicBtn (`micbtn --gaze-serve`), because macOS gives the
 camera to an app and refuses a bare python under launchd. Started by hand from a terminal it uses the
-terminal's Camera permission instead. `--glow` reads where iTerm's panes are through Accessibility, which
+terminal's Camera permission instead. `--glow` reads where Ghostty's panes are through Accessibility, which
 MicBtn (or the terminal) needs.
 
 ## How it works
@@ -142,9 +160,8 @@ Every operation of both lands on the Neural Engine. Measured on an M5 Pro, one f
 - The built-in camera and at most one external monitor.
 - Tested on one machine (M5 Pro, macOS 26). Glasses, low light and a face far off to the side all cost
   accuracy.
-- `--glow` knows iTerm2 only.
-- micbtn's button support is the DJI Mic Mini's receiver (USB vendor 0x2ca3). Other HID buttons need a
-  line in `micbtn/Support.swift`.
+- `--glow` knows Ghostty and iTerm2 only.
+- The headset buttons are new and only partly tested: see "Which button".
 
 ## Licences
 

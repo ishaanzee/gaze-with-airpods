@@ -11,7 +11,7 @@ not a black-box regression, and includes head-movement passes so depth is actual
   python gaze.py --units gpu     run the models on the GPU instead (faster when the GPU is idle, slower when it is not)
   python gaze.py --bench         headless timing, no window
   python gaze.py --serve         no window: answer "where are they looking?" on a local socket (what micbtn asks)
-  python gaze.py --serve --glow  the same, following the eyes all the time, with a small dot in the corner of the iTerm pane looked at
+  python gaze.py --serve --glow  the same, following the eyes all the time, with a small dot in the corner of the Ghostty (or iTerm) pane looked at
   python gaze.py --point         ask the running --serve daemon once and print its answer
   python gaze.py --demo 14       a target to follow with your eyes, the gaze dot chasing it (--record clip.mov)
 Keys: Esc quit, C recalibrate everything, U recalibrate the external screen only, F toggle smoothing.
@@ -387,12 +387,15 @@ class Tracker:
         return ("laptop" if D is self.lap else "external", D.ox + p[0], D.oy + p[1])
 
 
+TERMINALS = ("Ghostty", "iTerm2")  # both show a pane as an AXTextArea inside an AXScrollArea
+
+
 class Glow:
-    """A small dot in the bottom-left corner of the iTerm pane being looked at. A click-through window of its
-    own, so iTerm is not touched. (It was a ring around the whole pane; that was too much to look at all day.)
+    """A small dot in the bottom-left corner of the terminal pane being looked at (Ghostty or iTerm). A click-through window of its
+    own, so the terminal is not touched. (It was a ring around the whole pane; that was too much to look at all day.)
 
     The panes come from Accessibility (each session is an AXTextArea inside an AXScrollArea), which is the
-    only place iTerm says where a pane is on screen. The daemon runs as MicBtn's child, so MicBtn's
+    only place either terminal says where a pane is on screen. The daemon runs as MicBtn's child, so MicBtn's
     Accessibility grant covers it.
     """
     M, D, INSET = 8, 7, 9  # room around the dot for its glow, its diameter, and how far in from the pane's corner
@@ -421,7 +424,7 @@ class Glow:
         self.since, self.count = 0.0, 0
         self.cache = {}  # pid -> (when, panes)
         if not AS.AXIsProcessTrusted():
-            print("glow: no Accessibility, so iTerm's panes cannot be read: turn on MicBtn under Privacy & Security > Accessibility", flush=True)
+            print("glow: no Accessibility, so the terminal's panes cannot be read: turn on MicBtn under Privacy & Security > Accessibility", flush=True)
 
     def _ax(self, el, attr):
         err, v = self.AS.AXUIElementCopyAttributeValue(el, attr, None)
@@ -441,7 +444,7 @@ class Glow:
         if time.time() - when < 0.7:
             return panes
         app, panes = self.AS.AXUIElementCreateApplication(pid), []
-        self.AS.AXUIElementSetMessagingTimeout(app, 0.3)  # a busy iTerm never stalls the tracker
+        self.AS.AXUIElementSetMessagingTimeout(app, 0.3)  # a busy terminal never stalls the tracker
 
         def walk(el, parent, depth):
             role = self._ax(el, "AXRole")
@@ -460,13 +463,13 @@ class Glow:
         return panes
 
     def pane_at(self, x, y):
-        """The iTerm pane under a point, when iTerm is the window showing there. Near misses snap to the closest."""
+        """The terminal pane under a point, when Ghostty or iTerm is the window showing there. Near misses snap to the closest."""
         opts = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
         for w in Quartz.CGWindowListCopyWindowInfo(opts, Quartz.kCGNullWindowID) or []:  # front to back
             b = w.get("kCGWindowBounds")
             if w.get("kCGWindowLayer") != 0 or not b or not (b["X"] <= x < b["X"] + b["Width"] and b["Y"] <= y < b["Y"] + b["Height"]):
                 continue
-            if w.get("kCGWindowOwnerName") != "iTerm2":
+            if w.get("kCGWindowOwnerName") not in TERMINALS:
                 return None
             best, gap = None, 60.0
             for p in self.panes(w["kCGWindowOwnerPID"]):
@@ -524,7 +527,7 @@ def serve(cam, gaze, a):
         os.unlink(SOCK)
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(SOCK); os.chmod(SOCK, 0o600); srv.listen(4)
-    print(f"serving on {SOCK}" + (f", tracking at up to {a.fps:g} fps" if track else ", on demand") + (", a dot on the iTerm pane looked at" if glow else ""), flush=True)
+    print(f"serving on {SOCK}" + (f", tracking at up to {a.fps:g} fps" if track else ", on demand") + (", a dot on the terminal pane looked at" if glow else ""), flush=True)
     hist, why, seen = [], "no-face", time.time()
 
     def look():
@@ -786,7 +789,7 @@ def main():
     ap.add_argument("--point", action="store_true")
     ap.add_argument("--frames", type=int, default=3, help="--serve: camera frames read per answer when not tracking")
     ap.add_argument("--track", action="store_true", help="--serve: follow the eyes all the time, so answers are instant")
-    ap.add_argument("--glow", action="store_true", help="--serve: a small dot in the corner of the iTerm pane being looked at (implies --track)")
+    ap.add_argument("--glow", action="store_true", help="--serve: a small dot in the corner of the Ghostty or iTerm pane being looked at (implies --track)")
     ap.add_argument("--fps", type=float, default=20, help="--serve --track: looks per second")
     ap.add_argument("--light", action="store_true", help="--bench: time the light path the tracking daemon uses")
     ap.add_argument("--demo", type=float, default=0, metavar="SECONDS", help="a target to follow with your eyes and the gaze dot chasing it")
