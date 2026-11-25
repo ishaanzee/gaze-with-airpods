@@ -69,6 +69,13 @@ if has("--self-test") {
     exit(failures.isEmpty ? 0 : 1)
 }
 
+if has("--mics") {
+    let all = DictationMic.everyone()
+    print(all.isEmpty ? "no app has a mic open" : all.joined(separator: "\n"))
+    print(Call.others(in: all).isEmpty ? "not in a call" : "in a call: " + Call.others(in: all).joined(separator: ", "))
+    exit(0)
+}
+
 // MARK: eye tracking (optional; Gaze.swift)
 
 if let daemon = flag("--gaze-serve") { Gaze.serve(daemon) }

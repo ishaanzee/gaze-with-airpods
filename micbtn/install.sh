@@ -169,6 +169,7 @@ EOF
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>StartInterval</key><integer>30</integer>
   <key>ProcessType</key><string>Interactive</string>
   <key>ThrottleInterval</key><integer>5</integer>
   <key>StandardOutPath</key><string>$log</string>

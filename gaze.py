@@ -48,11 +48,27 @@ class Camera:
     """Keeps only the newest frame so inference never works on a stale one."""
 
     def __init__(self, index):
-        self.cap = cv2.VideoCapture(index)
+        self.index, self.n, self.cap = index, 0, None
+        self.open()
+
+    def open(self):
+        if self.cap is not None:
+            return
+        self.cap = cv2.VideoCapture(self.index)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-        self.frame, self.n, self.ok = None, 0, True
-        threading.Thread(target=self._run, daemon=True).start()
+        self.frame, self.ok = None, True
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def close(self):
+        """Lets go of the camera (its light goes out) until open()."""
+        if self.cap is None:
+            return
+        self.ok = False
+        self.thread.join(2)
+        self.cap.release()
+        self.cap = None
 
     def _run(self):
         while self.ok:
@@ -529,6 +545,12 @@ def serve(cam, gaze, a):
     srv.bind(SOCK); os.chmod(SOCK, 0o600); srv.listen(4)
     print(f"serving on {SOCK}" + (f", tracking at up to {a.fps:g} fps" if track else ", on demand") + (", a dot on the terminal pane looked at" if glow else ""), flush=True)
     hist, why, seen = [], "no-face", time.time()
+    # MicBtn, which runs this daemon, says when a call starts and ends (micbtn/Call.swift): the camera is
+    # let go for as long as it lasts, and every answer is "none in-call".
+    import signal
+    call = {"on": False}
+    signal.signal(signal.SIGUSR1, lambda *_: call.update(on=True))
+    signal.signal(signal.SIGUSR2, lambda *_: call.update(on=False))
 
     def look():
         """One camera frame through the model, into the history."""
@@ -560,6 +582,13 @@ def serve(cam, gaze, a):
             t0 = time.time()
             tr.refresh()
             asleep = bool(Quartz.CGDisplayIsAsleep(Quartz.CGMainDisplayID())) or tr.mapper is None
+            if call["on"] and cam.cap is not None:
+                cam.close(); hist.clear(); why = "in-call"
+                print(f"{time.strftime('%H:%M:%S')} in a call: the camera is released", flush=True)
+            elif not call["on"] and cam.cap is None:
+                cam.open(); why = "no-face"
+                print(f"{time.strftime('%H:%M:%S')} the call is over: the camera is back", flush=True)
+            asleep = asleep or call["on"]
             pane = None
             if track and not asleep:
                 look()

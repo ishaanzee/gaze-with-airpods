@@ -34,6 +34,7 @@ final class MediaButton: ButtonSource {
     func open() -> IOReturn {
         let center = MPRemoteCommandCenter.shared()
         let click: (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus = { [weak self] _ in
+            guard !Call.on else { return .commandFailed }
             self?.onClick(HIDButton.now())
             self?.claim()  // a pause must not leave MicBtn "paused": the next press has to come here too
             return .success
@@ -54,6 +55,11 @@ final class MediaButton: ButtonSource {
             return .success
         }
         if mediaSilence { startSilence() }
+        // In a call the stem is the call's (mute, hang up): give Now Playing up until it is over.
+        Call.watch { [weak self] apps in
+            log(apps.isEmpty ? "the call is over: the button is back" : "in a call (\(apps.joined(separator: ", "))): the button stands down")
+            self?.claim()
+        }
         claim()
         Timer.scheduledTimer(withTimeInterval: mediaReclaim, repeats: true) { [weak self] _ in self?.claim() }
         attached = 1
@@ -65,6 +71,11 @@ final class MediaButton: ButtonSource {
     /// really playing.
     private func claim() {
         let info = MPNowPlayingInfoCenter.default()
+        guard !Call.on else {
+            info.nowPlayingInfo = nil
+            info.playbackState = .stopped
+            return
+        }
         info.nowPlayingInfo = [MPMediaItemPropertyTitle: "MicBtn: press to dictate", MPNowPlayingInfoPropertyPlaybackRate: 1.0,
                                MPNowPlayingInfoPropertyIsLiveStream: true]
         info.playbackState = .paused

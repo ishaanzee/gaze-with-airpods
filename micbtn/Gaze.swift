@@ -94,7 +94,15 @@ enum Gaze {
             log("cannot run \(command): \(error.localizedDescription)")
             exit(1)
         }
-        daemon.waitUntilExit()
-        exit(daemon.terminationStatus)
+        // In a call the daemon lets go of the camera (SIGUSR1) and takes it back after (SIGUSR2): Call.swift.
+        Call.watch { apps in
+            log(apps.isEmpty ? "the call is over: gaze resumes" : "in a call (\(apps.joined(separator: ", "))): gaze pauses")
+            kill(daemon.processIdentifier, apps.isEmpty ? SIGUSR2 : SIGUSR1)
+        }
+        DispatchQueue.global().async {
+            daemon.waitUntilExit()
+            exit(daemon.terminationStatus)
+        }
+        dispatchMain()
     }
 }

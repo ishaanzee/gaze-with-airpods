@@ -1,4 +1,4 @@
-# gaze
+# Gaze with AirPods
 
 Look at an agent's pane, press the button on your headset, talk. The words go to the agent you were looking
 at. No mouse, no keyboard, no window switching.

@@ -54,6 +54,12 @@ enum DictationMic {
     /// The answer asked of CoreAudio now: the app's processes only.
     static func asked() -> Bool { app.contains { running($0) } }
 
+    /// Bundle ids of everything reading an input right now. Asks every audio process (30 to 130 ms): never
+    /// on the path of a click.
+    static func everyone() -> [String] {
+        processes().filter { running($0) }.map { bundle($0) }
+    }
+
     private static func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
     }
