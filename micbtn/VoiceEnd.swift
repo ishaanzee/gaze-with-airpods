@@ -20,6 +20,8 @@ final class VoiceEnd {
     var onQuiet: (_ why: String) -> Void = { _ in }
     private var engine: AVAudioEngine?
     private var observer: NSObjectProtocol?
+    private var device: AudioDeviceID = 0     // the built-in mic, while it is being read
+    private var proc: AudioDeviceIOProcID?
     private let state = DispatchQueue(label: "micbtn.voice")
     // On `state`:
     private var floor = 0.0, spoken = 0.0, peak = 0.0
@@ -42,6 +44,11 @@ final class VoiceEnd {
 
     func stop() {
         state.sync { fired = true }
+        if let proc {
+            AudioDeviceStop(device, proc)
+            AudioDeviceDestroyIOProcID(device, proc)
+        }
+        proc = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
         engine?.inputNode.removeTap(onBus: 0)
@@ -71,11 +78,44 @@ final class VoiceEnd {
     }
 
     private func listen() {
+        if (flag("--auto-send-mic") ?? "builtin") != "default", let mic = VoiceEnd.builtInMic() {
+            if listen(to: mic) { return }
+            log("--auto-send: cannot read the built-in mic: using the default input")
+        }
+        listenToDefault()
+    }
+
+    /// Reads the built-in mic straight from CoreAudio, and nothing else. An AVAudioEngine cannot do this:
+    /// its input node starts life on an aggregate of the default input and output, and when the default
+    /// input is the headset's mic that alone puts AirPods in call mode (measured: 30 ms after the click,
+    /// 270 ms before the engine could be moved to the built-in mic), and the sound breaks up for seconds.
+    private func listen(to mic: AudioDeviceID) -> Bool {
+        var at = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate, mScope: kAudioObjectPropertyScopeGlobal,
+                                            mElement: kAudioObjectPropertyElementMain)
+        var rate = 0.0, size = UInt32(MemoryLayout<Double>.size)
+        guard AudioObjectGetPropertyData(mic, &at, 0, nil, &size, &rate) == noErr, rate > 0 else { return false }
+        var id: AudioDeviceIOProcID?
+        // The device hands every reader 32-bit floats, channels interleaved.
+        let status = AudioDeviceCreateIOProcIDWithBlock(&id, mic, nil) { [weak self] _, input, _, _, _ in
+            let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
+            guard let self, let buffer = buffers.first, let data = buffer.mData, buffer.mNumberChannels > 0 else { return }
+            let count = Int(buffer.mDataByteSize) / MemoryLayout<Float32>.size
+            guard count > 0 else { return }
+            let samples = data.assumingMemoryBound(to: Float32.self)
+            var sum = 0.0
+            for i in 0..<count { sum += Double(samples[i]) * Double(samples[i]) }
+            self.heard(rms: (sum / Double(count)).squareRoot(), seconds: Double(count / Int(buffer.mNumberChannels)) / rate)
+        }
+        guard status == noErr, let id else { return false }
+        guard AudioDeviceStart(mic, id) == noErr else { AudioDeviceDestroyIOProcID(mic, id); return false }
+        device = mic
+        proc = id
+        return true
+    }
+
+    private func listenToDefault() {
         let engine = AVAudioEngine()
         let input = engine.inputNode
-        if (flag("--auto-send-mic") ?? "builtin") != "default", let mic = VoiceEnd.builtInMic() {
-            do { try input.auAudioUnit.setDeviceID(mic) } catch { log("--auto-send: cannot pick the built-in mic (\(error.localizedDescription)): using the default input") }
-        }
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { return log("--auto-send: no input to listen to; press again to send") }
         // No format asked for: the tap takes whatever the input has at that moment. Asking for the one read
@@ -94,7 +134,7 @@ final class VoiceEnd {
             guard let self, self.engine === engine, !self.state.sync(execute: { self.fired }) else { return }
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
-            self.listen()
+            self.listenToDefault()
         }
     }
 
