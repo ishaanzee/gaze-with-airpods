@@ -56,8 +56,23 @@ enum DictationMic {
 
     /// Bundle ids of everything reading an input right now. Asks every audio process (30 to 130 ms): never
     /// on the path of a click.
+    ///
+    /// Only a process reading a real input device counts. One reading an audio tap (another app's output,
+    /// as the Now Playing widget does to draw its waveform while Music plays) also says IsRunningInput, but
+    /// its device is a private aggregate nobody else can see, so its input device list comes back empty
+    /// (measured on macOS 27: [] for com.apple.MediaRemoteUIService's tap, [the AirPods mic] for a recorder).
+    /// Counted as a mic, the tap made a "call" that came and went every 10 s with Music playing.
     static func everyone() -> [String] {
-        processes().filter { running($0) }.map { bundle($0) }
+        processes().filter { running($0) && readsADevice($0) }.map { bundle($0) }
+    }
+
+    /// False only when CoreAudio answers that the process has no input device; no answer counts as a mic.
+    private static func readsADevice(_ process: AudioObjectID) -> Bool {
+        var at = AudioObjectPropertyAddress(mSelector: kAudioProcessPropertyDevices, mScope: kAudioObjectPropertyScopeInput,
+                                            mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(process, &at, 0, nil, &size) == noErr else { return true }
+        return size > 0
     }
 
     private static func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {

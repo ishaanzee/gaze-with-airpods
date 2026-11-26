@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>io.github.ishaanzee.micbtn</string>
+  <key>CFBundleName</key><string>MicBtn</string>
+  <key>CFBundleExecutable</key><string>micbtn</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSCameraUsageDescription</key><string>micbtn runs the eye tracker (gaze) that tells it which window you are looking at when you start dictating.</string>
+  <key>NSMicrophoneUsageDescription</key><string>micbtn reads the mic's level to tell when its talk button is held.</string>
+  <key>NSAppleEventsUsageDescription</key><string>micbtn's --double command drives other apps, such as splitting a Ghostty pane.</string>
+</dict></plist>
