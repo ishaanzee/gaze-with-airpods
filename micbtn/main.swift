@@ -63,7 +63,7 @@ let keyCode: CGKeyCode = {
 // MARK: self-test
 
 if has("--self-test") {
-    let failures = gestureFailures() + clickFailures()
+    let failures = gestureFailures() + clickFailures() + MediaButton.senderFailures()
     failures.forEach { print("FAIL \($0)") }
     print(failures.isEmpty ? "self-test passed" : "self-test: \(failures.count) failed")
     exit(failures.isEmpty ? 0 : 1)

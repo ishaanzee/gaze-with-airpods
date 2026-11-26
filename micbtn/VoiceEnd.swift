@@ -78,11 +78,14 @@ final class VoiceEnd {
         }
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { return log("--auto-send: no input to listen to; press again to send") }
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            guard let self, let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+        // No format asked for: the tap takes whatever the input has at that moment. Asking for the one read
+        // above raised an uncaught "format mismatch" when the input changed in between (the headset going
+        // to a phone, or coming back, mid-dictation), which killed the process.
+        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
+            guard let self, let samples = buffer.floatChannelData?[0], buffer.frameLength > 0, buffer.format.sampleRate > 0 else { return }
             var sum = 0.0
             for i in 0..<Int(buffer.frameLength) { sum += Double(samples[i]) * Double(samples[i]) }
-            self.heard(rms: (sum / Double(buffer.frameLength)).squareRoot(), seconds: Double(buffer.frameLength) / format.sampleRate)
+            self.heard(rms: (sum / Double(buffer.frameLength)).squareRoot(), seconds: Double(buffer.frameLength) / buffer.format.sampleRate)
         }
         do { try engine.start() } catch { return log("--auto-send: cannot listen (\(error.localizedDescription)); press again to send") }
         self.engine = engine

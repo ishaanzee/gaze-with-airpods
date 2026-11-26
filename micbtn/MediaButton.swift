@@ -33,8 +33,13 @@ final class MediaButton: ButtonSource {
 
     func open() -> IOReturn {
         let center = MPRemoteCommandCenter.shared()
-        let click: (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus = { [weak self] _ in
+        let click: (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus = { [weak self] event in
             guard !Call.on else { return .commandFailed }
+            if let why = MediaButton.notAPress(String(describing: event)) {
+                self?.onOther("a pause or play nobody pressed (\(why))")
+                self?.claim()
+                return .success
+            }
             self?.onClick(HIDButton.now())
             self?.claim()  // a pause must not leave MicBtn "paused": the next press has to come here too
             return .success
@@ -65,6 +70,41 @@ final class MediaButton: ButtonSource {
         attached = 1
         DispatchQueue.main.async { [self] in onAttach("headset play/pause") }
         return kIOReturnSuccess
+    }
+
+    /// Why a play or pause command is not a button press, or nil when it is one (or cannot be told).
+    ///
+    /// macOS pauses the Now Playing app by itself, with the same command a squeeze sends, when the
+    /// headset leaves: an iPhone takes the AirPods for a call (sent by the AirPods daemon, cloudpaird;
+    /// several per call, the first ~120 ms before the audio route changes), or an AirPod comes out of
+    /// the ear (sent by mediaremoted with no sender; `play` again when it goes back in). A real press
+    /// comes from rcd. The only thing that tells them apart is the sender, and the only public place it
+    /// shows is the event's description (measured on macOS 27):
+    ///   ... sourceID=SenderDevice = <Mac>, SenderBundleIdentifier = <com.apple.rcd>, SenderPID = <22340> ((null))>
+    ///   ... sourceID=SenderDevice = <Mac>, SenderBundleIdentifier = <com.apple.cloudpaird>, SenderPID = <1007> ((null))>
+    ///   ... sourceID=(null) ((null))>
+    /// A description with no sourceID at all is a press: if macOS stops printing it, the button keeps working.
+    static func notAPress(_ description: String) -> String? {
+        guard let source = description.range(of: "sourceID=") else { return nil }
+        let rest = description[source.upperBound...]
+        if rest.hasPrefix("(null)") { return "no sender: an AirPod went out of, or into, the ear" }
+        guard let start = rest.range(of: "SenderBundleIdentifier = <"),
+              let end = rest[start.upperBound...].firstIndex(of: ">") else { return nil }
+        let sender = String(rest[start.upperBound..<end])
+        return sender == "com.apple.cloudpaird" ? "from \(sender): the headset went to another device" : nil
+    }
+
+    static func senderFailures() -> [String] {
+        let event = "<MPRemoteCommandEvent: 0x7760c17540 commandID=74BAC8F4 command=<MPRemoteCommand: 0x7760b30780 type=Pause (1) enabled=YES handlers=[0x7761756220]> "
+        let cases: [(String, Bool)] = [
+            (event + "sourceID=SenderDevice = <Mac>, SenderBundleIdentifier = <com.apple.rcd>, SenderPID = <22340> ((null))>", true),
+            (event + "sourceID=SenderDevice = <>, SenderBundleIdentifier = <com.apple.rcd>, SenderPID = <22340> ((null))>", true),
+            (event + "sourceID=SenderDevice = <Mac>, SenderBundleIdentifier = <com.apple.cloudpaird>, SenderPID = <1007> ((null))>", false),
+            (event + "sourceID=(null) ((null))>", false),
+            (event + ">", true),
+            ("", true),
+        ]
+        return cases.filter { (notAPress($0.0) == nil) != $0.1 }.map { "media sender: \($0.0.suffix(90))" }
     }
 
     /// Says "playing" again. macOS gives the buttons to the app that said so last, unless another is

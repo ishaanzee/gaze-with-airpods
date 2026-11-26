@@ -56,6 +56,10 @@ stream running to hold them here).
 and the eye tracker lets go of the camera; both come back when the mic closes. `micbtn --mics` says what it
 sees; `--call-ignore <bundle id prefix>` exempts an app, `--no-call-pause` turns it off.
 
+A call on a nearby iPhone takes the AirPods away, and macOS then pauses the Now Playing app with the same
+command a squeeze sends; so does taking an AirPod out of your ear. MicBtn tells these from a press by who
+sent them and ignores them (the log says `ignored: a pause or play nobody pressed`).
+
 **One squeeze.** `--auto-send 1.5` ends dictation and sends once you have been quiet for 1.5 s, so a single
 squeeze does the whole round. A second squeeze still ends it at once.
 
