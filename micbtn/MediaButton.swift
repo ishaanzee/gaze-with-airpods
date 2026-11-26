@@ -15,6 +15,7 @@
 // a silent output stream running, which holds the headset on this Mac instead of an iPhone nearby.
 
 import AVFoundation
+import CoreAudio
 import Foundation
 import IOKit
 import MediaPlayer
@@ -37,6 +38,7 @@ final class MediaButton: ButtonSource {
             guard !Call.on else { return .commandFailed }
             if let why = MediaButton.notAPress(String(describing: event)) {
                 self?.onOther("a pause or play nobody pressed (\(why))")
+                if why.contains("another device") { self?.leave() }
                 self?.claim()
                 return .success
             }
@@ -70,6 +72,40 @@ final class MediaButton: ButtonSource {
         attached = 1
         DispatchQueue.main.async { [self] in onAttach("headset play/pause") }
         return kIOReturnSuccess
+    }
+
+    /// The headset went to another device (an iPhone took the AirPods for a call): stop saying "playing"
+    /// until it is back.
+    ///
+    /// A Mac that says it is playing is what kept the AirPods from coming back after the call (measured):
+    /// 2 s after losing them macOS moves an app that "is playing" to the speakers, and on the speakers
+    /// nothing asks for the AirPods again, while its own way back is skipped ("Mac is not idle") for as
+    /// long as MicBtn claims. So: say nothing while that 2 s passes. If the output is still the headset
+    /// after `awayAtLeast`, claiming again is what brings it back: each claim is a request macOS refuses
+    /// during the call and grants after it. If the output did move to the speakers, stay quiet until it
+    /// is a Bluetooth device again (macOS's doing or yours), or `awayAtMost` at the longest.
+    private var away = false, leftAt = 0.0
+    private let awayAtLeast = 10.0, awayAtMost = 1800.0
+
+    private func leave() {
+        if !away { log("the headset went to another device: giving up Now Playing until it is back") }
+        away = true
+        leftAt = HIDButton.now()
+    }
+
+    /// Whether sound goes to a Bluetooth device right now.
+    static func outputIsBluetooth() -> Bool {
+        func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+            AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        }
+        var device = AudioDeviceID(0), size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var at = address(kAudioHardwarePropertyDefaultOutputDevice)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &at, 0, nil, &size, &device) == noErr else { return false }
+        var transport: UInt32 = 0
+        size = UInt32(MemoryLayout<UInt32>.size)
+        at = address(kAudioDevicePropertyTransportType)
+        guard AudioObjectGetPropertyData(device, &at, 0, nil, &size, &transport) == noErr else { return false }
+        return transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
     }
 
     /// Why a play or pause command is not a button press, or nil when it is one (or cannot be told).
@@ -111,7 +147,11 @@ final class MediaButton: ButtonSource {
     /// really playing.
     private func claim() {
         let info = MPNowPlayingInfoCenter.default()
-        guard !Call.on else {
+        if away, HIDButton.now() - leftAt >= awayAtLeast, MediaButton.outputIsBluetooth() || HIDButton.now() - leftAt >= awayAtMost {
+            away = false
+            log("the headset is back, or should be: the button claims Now Playing again")
+        }
+        guard !Call.on, !away else {
             info.nowPlayingInfo = nil
             info.playbackState = .stopped
             return
