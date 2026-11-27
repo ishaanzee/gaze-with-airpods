@@ -16,9 +16,13 @@ on run argv
 		if (count of windows) is 0 then
 			new window with configuration cfg
 		else
-			set pane to split (focused terminal of selected tab of front window) direction right with configuration cfg
+			-- Up to four panes side by side; from then on the pane in focus is split top and bottom instead.
+			set here to selected tab of front window
+			set way to right
+			if (count of terminals of here) is greater than or equal to 4 then set way to down
+			set pane to split (focused terminal of here) direction way with configuration cfg
 			-- A split halves the pane it splits, so the third pane would be a quarter and the first still a
-			-- half: even them out, so every pane in the row is the same width however many there are.
+			-- half: even them out, so the columns are the same width, and the panes within a column the same height.
 			perform action "equalize_splits" on pane
 			focus pane
 		end if
