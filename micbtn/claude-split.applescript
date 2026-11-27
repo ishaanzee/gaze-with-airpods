@@ -17,6 +17,9 @@ on run argv
 			new window with configuration cfg
 		else
 			set pane to split (focused terminal of selected tab of front window) direction right with configuration cfg
+			-- A split halves the pane it splits, so the third pane would be a quarter and the first still a
+			-- half: even them out, so every pane in the row is the same width however many there are.
+			perform action "equalize_splits" on pane
 			focus pane
 		end if
 		activate
